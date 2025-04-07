@@ -12,28 +12,94 @@ namespace CardSystem
         [SerializeField] private CardCollection cardCollection;
         [SerializeField] private GameObject cardPrefab;
 
+        private bool _isInitialized;
+        public bool IsInitialized => _isInitialized;
+
+        // 场景加载时重置状态
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics()
+        {
+            Instance?.Reset();
+        }
+
+        private void Reset()
+        {
+            _isInitialized = false;
+        }
+
         protected override void Awake()
         {
             base.Awake();
+            ValidateRequiredComponents();
+        }
+
+        private void ValidateRequiredComponents()
+        {
+            if (cardCollection == null)
+            {
+                Debug.LogError("CardSystemManager: 未设置卡牌集合!");
+                return;
+            }
+
+            if (cardPrefab == null)
+            {
+                Debug.LogError("CardSystemManager: 未设置卡牌预制体!");
+                return;
+            }
+
+            // 验证预制体是否包含必要组件
+            if (!cardPrefab.GetComponent<CardRuntime>())
+            {
+                Debug.LogError("CardSystemManager: 卡牌预制体缺少CardRuntime组件!");
+            }
         }
 
         public void Initialize()
         {
-            // 确保EffectRegistry已初始化
-            EffectRegistry.Instance.Initialize();
-
-            // 初始化卡牌集合
-            if (cardCollection != null)
+            if (_isInitialized)
             {
+                Debug.LogWarning("CardSystemManager: 已经初始化过了!");
+                return;
+            }
+
+            if (!ValidateSetup()) return;
+
+            try
+            {
+                // 确保EffectRegistry已初始化
+                EffectRegistry.Instance.Initialize();
+
+                // 初始化卡牌集合
                 cardCollection.Initialize();
 
                 // 预加载所有卡牌的效果类型
                 PreloadAllCardEffects();
+
+                _isInitialized = true;
+                Debug.Log("CardSystemManager: 初始化完成");
             }
-            else
+            catch (System.Exception ex)
             {
-                Debug.LogError("CardManager: 未设置卡牌集合!");
+                Debug.LogError($"CardSystemManager: 初始化失败: {ex.Message}");
+                _isInitialized = false;
             }
+        }
+
+        private bool ValidateSetup()
+        {
+            if (cardCollection == null)
+            {
+                Debug.LogError("CardSystemManager: 未设置卡牌集合!");
+                return false;
+            }
+
+            if (cardPrefab == null)
+            {
+                Debug.LogError("CardSystemManager: 未设置卡牌预制体!");
+                return false;
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -41,71 +107,91 @@ namespace CardSystem
         /// </summary>
         private void PreloadAllCardEffects()
         {
-            HashSet<string> allEffectTypes = new HashSet<string>();
+            if (cardCollection == null || cardCollection.cards == null) return;
 
+            HashSet<string> allEffectTypes = new HashSet<string>();
             foreach (var card in cardCollection.cards)
             {
-                string[] effectTypes = card.GetEffectTypes();
-                foreach (var type in effectTypes)
+                if (card != null)
                 {
-                    allEffectTypes.Add(type);
+                    string[] effectTypes = card.GetEffectTypes();
+                    foreach (var type in effectTypes)
+                    {
+                        allEffectTypes.Add(type);
+                    }
                 }
             }
 
-            string[] uniqueEffectTypes = new string[allEffectTypes.Count];
-            allEffectTypes.CopyTo(uniqueEffectTypes);
-            EffectRegistry.Instance.PreloadEffects(uniqueEffectTypes);
+            if (allEffectTypes.Count > 0)
+            {
+                string[] uniqueEffectTypes = new string[allEffectTypes.Count];
+                allEffectTypes.CopyTo(uniqueEffectTypes);
+                EffectRegistry.Instance.PreloadEffects(uniqueEffectTypes);
+            }
         }
 
         /// <summary>
         /// 创建卡牌实例
         /// </summary>
-        /// <param name="cardId"></param>
-        /// <param name="position"></param>
-        /// <param name="parent"></param>
-        /// <returns></returns>
         public GameObject CreateCardInstance(string cardId, Vector3 position = default, Transform parent = null)
         {
-            if (cardPrefab is null)
+            if (!_isInitialized)
             {
-                Debug.LogError("CardManager: 未设置卡牌预制体!");
+                Debug.LogError("CardSystemManager: 系统未初始化!");
+                return null;
+            }
+
+            if (string.IsNullOrEmpty(cardId))
+            {
+                Debug.LogError("CardSystemManager: 卡牌ID不能为空!");
                 return null;
             }
 
             var cardData = cardCollection.GetCardById(cardId);
-            if (cardData is null)
+            if (cardData == null)
             {
-                Debug.LogError($"CardManager: 找不到ID为 {cardId} 的卡牌!");
+                Debug.LogError($"CardSystemManager: 找不到ID为 {cardId} 的卡牌!");
                 return null;
             }
 
-            GameObject cardObject = Instantiate(cardPrefab, position, Quaternion.identity, parent);
-            var cardRuntime = cardObject.GetComponent<CardRuntime>();
-            if (cardRuntime != null)
+            try
             {
-                cardRuntime.SetCardData(cardData);
+                GameObject cardObject = Instantiate(cardPrefab, position, Quaternion.identity, parent);
+                var cardRuntime = cardObject.GetComponent<CardRuntime>();
+                if (cardRuntime != null)
+                {
+                    cardRuntime.SetCardData(cardData);
+                    return cardObject;
+                }
+                else
+                {
+                    Destroy(cardObject);
+                    Debug.LogError("CardSystemManager: 卡牌预制体缺少CardRuntime组件!");
+                    return null;
+                }
             }
-            else
+            catch (System.Exception ex)
             {
-                Debug.LogError("CardManager: 卡牌预制体缺少CardRuntime组件!");
+                Debug.LogError($"CardSystemManager: 创建卡牌实例时发生错误: {ex.Message}");
+                return null;
             }
-
-            return cardObject;
         }
 
         /// <summary>
         /// 创建随机卡牌
         /// </summary>
-        /// <param name="cardType"></param>
-        /// <param name="position"></param>
-        /// <param name="parent"></param>
-        /// <returns></returns>
         public GameObject CreateRandomCard(CardType cardType, Vector3 position = default, Transform parent = null)
         {
-            var cards = cardCollection.GetCardsByType(cardType);
-            if (cards.Count is 0)
+            if (!_isInitialized)
             {
-                Debug.LogWarning($"CardManager: 没有类型为 {cardType} 的卡牌!");
+                Debug.LogError("CardSystemManager: 系统未初始化!");
+                return null;
+            }
+
+            var cards = cardCollection.GetCardsByType(cardType);
+            if (cards == null || cards.Count == 0)
+            {
+                Debug.LogWarning($"CardSystemManager: 没有类型为 {cardType} 的卡牌!");
                 return null;
             }
 
@@ -116,10 +202,20 @@ namespace CardSystem
         /// <summary>
         /// 获取卡牌数据
         /// </summary>
-        /// <param name="cardId"></param>
-        /// <returns></returns>
         public CardData GetCardData(string cardId)
         {
+            if (!_isInitialized)
+            {
+                Debug.LogError("CardSystemManager: 系统未初始化!");
+                return null;
+            }
+
+            if (string.IsNullOrEmpty(cardId))
+            {
+                Debug.LogError("CardSystemManager: 卡牌ID不能为空!");
+                return null;
+            }
+
             return cardCollection.GetCardById(cardId);
         }
     }

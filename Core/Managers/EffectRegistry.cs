@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using CDTU.Utils;
 using UnityEngine;
@@ -61,7 +62,9 @@ namespace CardSystem
         /// <param name="assembly"></param>
         private void RegisterEffectsFromAssembly(Assembly assembly)
         {
-            var effectTypes = assembly.GetTypes();
+            var effectTypes = assembly.GetTypes()
+                .Where(t => t.Namespace == "CardSystem" ||
+                t.Namespace?.StartsWith("CardSystem.") == true);
             foreach (var type in effectTypes)
             {
                 // 快速过滤不相关类型
